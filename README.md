@@ -105,6 +105,13 @@ The extension includes built-in diagnostic tools:
 
 This extension processes images locally and only sends them to OpenAI for analysis. No data is stored on servers beyond what's required for API processing. Your API key is stored securely in your browser's local storage.
 
+## Support Development
+
+If you find this extension helpful for your studies or work, consider supporting its development:
+
+- **CashApp**: $awesomepieman69
+- Your support helps maintain the extension and develop new features!
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details. 
