@@ -54,12 +54,11 @@ This extension requires an OpenAI API key to function properly:
 
 ## Usage
 
-### Analyzing Regions
+### Analyzing Regions/images
 
-1. Click the extension icon in the toolbar
-2. Select "Capture Region"
-3. Draw a rectangle around the area you want to analyze
-4. The extension will:
+1. Click the Camera icon on botton left 
+2. Draw a rectangle around the area you want to analyze
+3. The extension will:
    - Send the image to OpenAI Vision
    - Display the analysis results including extracted text and explanations
 
@@ -73,13 +72,6 @@ This extension requires an OpenAI API key to function properly:
    - Suggest the correct answer
    - Optionally auto-select the suggested answer
 
-### Analyzing Images
-
-1. Right-click on any image on a webpage
-2. Select "Scan to Solve" from the context menu
-3. The extension will:
-   - Send the image to OpenAI Vision
-   - Display the analysis results including extracted text and explanations
 
 ## Troubleshooting
 
