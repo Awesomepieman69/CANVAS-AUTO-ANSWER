@@ -77,7 +77,8 @@
       options: [],
       fullText: "",
       contextText: "", // Additional field for context
-      source: "standard_extraction"
+      source: "standard_extraction",
+      images: [] // Add an array to store image URLs
     };
     
     try {
@@ -162,8 +163,59 @@
       // Now focus on finding all answer options - this is the key improvement
       findAnswerOptionsImproved(container, result);
       
+      // --- START IMAGE EXTRACTION ---
+      const imageElements = container.querySelectorAll('img');
+      logDebug(`Found ${imageElements.length} image elements in the container.`);
+
+      imageElements.forEach(img => {
+          // Basic filtering: Skip tiny images if possible (using attributes)
+          const width = parseInt(img.getAttribute('width') || img.style.width || '0');
+          const height = parseInt(img.getAttribute('height') || img.style.height || '0');
+
+          // Skip if width or height is explicitly set to something small (e.g., < 30px)
+          if ((width > 0 && width < 30) || (height > 0 && height < 30)) {
+              logDebug(`Skipping potentially small image: ${img.src}`);
+              return;
+          }
+
+          // Skip if image is inside a button (like the CREAM button itself)
+          if (img.closest('.cream-btn, button')) {
+              logDebug(`Skipping image inside a button: ${img.src}`);
+              return;
+          }
+          
+          // Skip decorative images (basic check)
+          if (img.getAttribute('alt') === '' || img.getAttribute('role') === 'presentation') {
+               logDebug(`Skipping potentially decorative image: ${img.src}`);
+               return;
+          }
+
+          if (img.src) {
+              try {
+                  // Resolve relative URLs to absolute URLs
+                  const absoluteUrl = new URL(img.src, window.location.href).href;
+                  
+                  // Basic check to avoid data URIs for now
+                  if (!absoluteUrl.startsWith('data:')) {
+                      result.images.push(absoluteUrl);
+                      logDebug(`Added image URL: ${absoluteUrl}`);
+                  } else {
+                       logDebug(`Skipping data URI image: ${absoluteUrl.substring(0, 50)}...`);
+                  }
+              } catch (urlError) {
+                  console.warn(`[CreamHelper] Could not parse image src: ${img.src}`, urlError);
+              }
+          }
+      });
+      // --- END IMAGE EXTRACTION ---
+      
       // Create formatted full text with question and options
       result.fullText = result.question + "\n\n";
+      
+      // Add image references to fullText if any were found
+      if (result.images.length > 0) {
+          result.fullText += `\n[Image${result.images.length > 1 ? 's' : ''} present in question]\n`;
+      }
       
       if (result.options.length > 0) {
         result.fullText += "Options:\n";
@@ -730,7 +782,9 @@
       options: questionData.options || [],
       fullText: questionData.fullText,
       // Add contextText as an additional field for better AI understanding
-      contextText: questionData.contextText || questionData.fullText || questionData.question
+      contextText: questionData.contextText || questionData.fullText || questionData.question,
+      // Include the extracted image URLs
+      images: questionData.images || [] 
     };
     
     // Check if the question requires external knowledge (like about videos or content not in the question)

@@ -586,7 +586,7 @@ Please try selecting a region without people or try a different image.`,
       
       try {
         // Extract the question data
-        const { question, options, fullText, contextText } = message.questionData;
+        const { question, options, fullText, contextText, images } = message.questionData;
         
         if (!question || (!fullText && !contextText)) {
           console.error('[Creamy Error] [cream-analysis]: Insufficient question data provided');
@@ -595,20 +595,21 @@ Please try selecting a region without people or try a different image.`,
         }
         
         // Format the prompt for OpenAI - use contextText if available for better context
-        let prompt = contextText || fullText || question;
+        let promptText = contextText || fullText || question;
         
         // If we have options but not in the prompt already, format them nicely
-        if (options && options.length > 0 && !prompt.includes("Options:")) {
-          prompt += "\n\nOptions:\n" + options.map((opt, i) => `${i+1}) ${opt}`).join("\n");
+        if (options && options.length > 0 && !promptText.includes("Options:")) {
+          promptText += "\n\nOptions:\n" + options.map((opt, i) => `${i+1}) ${opt}`).join("\n");
         }
         
-        // Log the prompt length to help with debugging
-        console.log(`[Creamy Debug] [cream-analysis]: Sending to OpenAI (${prompt.length} chars): ${prompt.substring(0, 200)}...`);
+        // Log the prompt length and if images are included
+        const imageCount = images ? images.length : 0;
+        console.log(`[Creamy Debug] [cream-analysis]: Sending to OpenAI (${promptText.length} chars text, ${imageCount} images): ${promptText.substring(0, 200)}...`);
         
         // Check if this question requires external knowledge
         const forceAnswer = message.questionData.forceAnswer || false;
         
-        // Improved system prompt that handles both scenario types
+        // Improved system prompt (kept the same as before)
         const systemPrompt = forceAnswer ? 
         `You are a brilliant undergraduate student with exceptional knowledge across many fields including history, science, geography, literature, mathematics, and other academic subjects. You have a talent for answering questions clearly and accurately.
 
@@ -644,7 +645,103 @@ If the information in the question is genuinely insufficient to determine an ans
 
         // Always use GPT-4o regardless of context length
         const model = 'gpt-4o';
+
+        // --- START OpenAI MESSAGE CONSTRUCTION ---
+        const messages = [
+          { 
+            role: 'system', 
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            // Content will be populated below
+            content: [] // Initialize as an array for multi-modal input
+          }
+        ];
+
+        // Add the main text prompt first
+        messages[1].content.push({ 
+          type: 'text', 
+          text: `What is the correct answer to this question? Analyze it carefully and completely. If there isn't enough information to determine the answer with certainty, explain what's missing.\n\n${promptText}` 
+        });
+
+        // --- START IMAGE FETCHING AND PROCESSING ---
+        let imageFetchPromises = [];
+        if (images && images.length > 0) {
+          console.log(`[Creamy Debug] [cream-analysis]: Fetching ${images.length} images...`);
+          imageFetchPromises = images.map(async (imageUrl) => {
+            if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
+              try {
+                // Fetch the image using the background script's context
+                const response = await fetch(imageUrl);
+                if (!response.ok) {
+                  throw new Error(`Failed to fetch image ${imageUrl}: ${response.status} ${response.statusText}`);
+                }
+                const blob = await response.blob();
+                
+                // Convert blob to base64 data URL
+                return new Promise((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    // Ensure the result is a valid data URL string
+                    if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
+                      // Basic size check (OpenAI limit is 20MB)
+                      const imageSizeInMB = (reader.result.length * 3 / 4) / (1024 * 1024);
+                      if (imageSizeInMB > 19.5) { // Leave a small margin
+                        console.warn(`[Creamy Warning] [cream-analysis]: Image ${imageUrl} (${imageSizeInMB.toFixed(2)}MB) exceeds size limit, skipping.`);
+                        resolve(null); // Resolve with null to indicate skip
+                      } else {
+                        resolve(reader.result); // Resolve with the data URL
+                      }
+                    } else {
+                      reject(new Error(`Failed to read image ${imageUrl} as data URL.`));
+                    }
+                  };
+                  reader.onerror = (error) => reject(error);
+                  reader.readAsDataURL(blob);
+                });
+              } catch (error) {
+                console.error(`[Creamy Error] [cream-analysis]: Error fetching image ${imageUrl}:`, error);
+                return null; // Return null on fetch error
+              }
+            } else {
+              console.warn(`[Creamy Warning] [cream-analysis]: Skipping invalid or non-http image URL: ${imageUrl}`);
+              return null; // Return null for invalid URLs
+            }
+          });
+        }
         
+        // Wait for all image fetches to complete
+        const imageDataUrls = (await Promise.all(imageFetchPromises)).filter(url => url !== null);
+        console.log(`[Creamy Debug] [cream-analysis]: Successfully fetched and converted ${imageDataUrls.length} images to data URLs.`);
+        // --- END IMAGE FETCHING AND PROCESSING ---
+
+        // Add the fetched image data URLs to the messages
+        if (imageDataUrls.length > 0) {
+          imageDataUrls.forEach(dataUrl => {
+            messages[1].content.push({
+              type: 'image_url',
+              image_url: { 
+                url: dataUrl,
+                // Optional: Set detail level if needed (e.g., 'low' for large images)
+                // detail: "auto"
+              } 
+            });
+          });
+          console.log(`[Creamy Debug] [cream-analysis]: Added ${imageDataUrls.length} data URLs to the OpenAI request.`);
+        } else if (images && images.length > 0) {
+          console.warn(`[Creamy Warning] [cream-analysis]: Failed to fetch any valid images from the provided URLs.`);
+          // If images were expected but none fetched, send only text
+          messages[1].content = messages[1].content[0].text;
+        } else {
+          // If no images were ever present, send only text
+          messages[1].content = messages[1].content[0].text;
+        }
+        // --- END OpenAI MESSAGE CONSTRUCTION ---
+        
+        // Increase max_tokens if images are present
+        const maxTokens = imageDataUrls.length > 0 ? 2000 : 800;
+
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -653,17 +750,8 @@ If the information in the question is genuinely insufficient to determine an ans
           },
           body: JSON.stringify({
             model: model,
-            messages: [
-              { 
-                role: 'system', 
-                content: systemPrompt
-              },
-              {
-                role: 'user',
-                content: `What is the correct answer to this question? Analyze it carefully and completely. If there isn't enough information to determine the answer with certainty, explain what's missing.\n\n${prompt}`
-              }
-            ],
-            max_tokens: 800,
+            messages: messages, // Use the constructed messages array
+            max_tokens: maxTokens, // Adjusted max_tokens
             temperature: 0.1
           })
         });
