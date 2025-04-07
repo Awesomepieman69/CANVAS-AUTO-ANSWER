@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Creamy</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      width: 400px;
+      margin: 0;
+      padding: 0;
+      background-color: #000000;
+      color: white;
+    }
+    
+    header {
+      background: #000000;
+      color: rgb(255, 255, 255);
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #333;
+    }
+    
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    .content {
+      padding: 15px;
+      background-color: #000000;
+    }
+    
+    .ocr-section {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    
+    .info-text {
+      font-size: 14px;
+      color: #ccc;
+      line-height: 1.5;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #222;
+    }
+    
+    button {
+      background-color: #000000;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+      font-size: 14px;
+    }
+    
+    button:hover {
+      background-color: #333333;
+    }
+    
+    button:disabled {
+      background-color: #666666;
+      cursor: not-allowed;
+    }
+    
+    #statusText {
+      font-size: 14px;
+      color: #999;
+      margin-top: 10px;
+    }
+    
+    #ocrStatus {
+      margin-top: 15px;
+      border-top: 1px solid #000000;
+      padding-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Creamy</h1>
+  </header>
+  
+  <div class="content">
+    <div id="statusText"></div>
+    
+    <div class="ocr-section">
+      <div class="info-text">
+        Use the floating camera button on the page to select a region for image analysis.
+      </div>
+      <div id="ocrStatus"></div>
+    </div>
+
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #333;">
+      <button id="creamAllButton">Creamate All</button>
+    </div>
+
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
