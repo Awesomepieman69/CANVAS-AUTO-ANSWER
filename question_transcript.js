@@ -72,6 +72,8 @@
   
   // Extract formatted question and answers from container
   function extractQuestionAndAnswers(container) {
+    // --- REMOVE LOGGING ---
+    // console.log('[CreamHelper DIAGNOSTIC] Starting extraction within container:', container);
     let result = {
       question: "",
       options: [],
@@ -80,90 +82,116 @@
       source: "standard_extraction",
       images: [] // Add an array to store image URLs
     };
-    
+    let headerText = ""; // Initialize headerText
+
     try {
-      // First, temporarily hide any CREAM buttons to prevent picking up their text
+      // First, temporarily hide any CREAM buttons
       const creamButtons = container.querySelectorAll('.cream-btn');
       creamButtons.forEach(btn => {
         btn.dataset.originalDisplay = btn.style.display;
         btn.style.display = 'none';
       });
-      
-      // Get the full container text for context
+
       result.contextText = container.textContent.trim();
-      
-      // Get question header and content separately for better extraction
-      // 1. Extract the question header first
-      const questionHeader = container.querySelector('h1, h2, h3, h4, h5, h6, .question_text, .question_name, .question-header, .questionHeader, .quiz_question');
-      let headerText = "";
-      
-      if (questionHeader) {
-        // Clone the element to safely get its text without buttons
-        const clonedHeader = questionHeader.cloneNode(true);
-        const buttonsInClone = clonedHeader.querySelectorAll('.cream-btn');
-        buttonsInClone.forEach(btn => btn.remove()); // Remove buttons from clone
-        headerText = clonedHeader.textContent.trim();
-        logDebug(`Extracted header text: ${headerText.substring(0, 50)}...`);
+
+      // --- MODIFIED EXTRACTION LOGIC --- 
+      // Priority 1: Look for a specific question body element first
+      const questionBodyElement = container.querySelector('.question_text, .text, .stem'); // Common classes for question body
+      if (questionBodyElement) {
+        const clonedBody = questionBodyElement.cloneNode(true);
+        const buttonsInClone = clonedBody.querySelectorAll('.cream-btn');
+        buttonsInClone.forEach(btn => btn.remove());
+        headerText = clonedBody.textContent.trim();
+        // --- REMOVE LOGGING ---
+        // logDebug(`[DIAGNOSTIC] Text found via Question Body Strategy (.question_text, .text, .stem): ${headerText.substring(0, 150)}...`);
       }
-      
-      // 2. If no text in header or no header found, look for question text directly
+
+      // Priority 2: If no body found, look for the header element (like .question_name)
       if (!headerText) {
-        // Try to find question text in common question containers
-        const possibleQuestionContainers = container.querySelectorAll('.question-text, .question_text, .question-stem, .stem, [aria-label*="question"]');
-        
+        const questionHeader = container.querySelector('h1, h2, h3, h4, h5, h6, .question_name, .question-header, .questionHeader, .quiz_question');
+        if (questionHeader) {
+          // Found the header, BUT DON'T use its text directly yet.
+          // Try to find the actual question text nearby, e.g., the next sibling div
+          let sibling = questionHeader.nextElementSibling;
+          while (sibling && sibling.nodeName !== 'DIV' && !sibling.textContent.trim()) {
+            // Skip non-divs or empty siblings
+            sibling = sibling.nextElementSibling;
+          }
+          if (sibling && sibling.nodeName === 'DIV' && sibling.textContent.trim()) {
+            const clonedSibling = sibling.cloneNode(true);
+            const buttonsInSiblingClone = clonedSibling.querySelectorAll('.cream-btn');
+            buttonsInSiblingClone.forEach(btn => btn.remove());
+            headerText = clonedSibling.textContent.trim();
+            // --- REMOVE LOGGING ---
+            // logDebug(`[DIAGNOSTIC] Text found via Header's Next Sibling Div Strategy: ${headerText.substring(0, 150)}...`);
+          } else {
+            // --- REMOVE LOGGING ---
+            // logDebug(`[DIAGNOSTIC] Found header (.question_name, h*, etc.), but couldn't find suitable sibling text. Will proceed to container/paragraph checks.`);
+          }
+          // NOTE: We no longer assign the header's own text here initially
+          // logDebug(`Extracted header text: ${headerText.substring(0, 50)}...`); 
+        }
+      }
+
+      // Priority 3: Look for specific question containers (if header/body strategies failed)
+      if (!headerText) {
+        const possibleQuestionContainers = container.querySelectorAll('.question-text, .question-stem, [aria-label*="question"]');
         for (const qContainer of possibleQuestionContainers) {
           if (qContainer.textContent && qContainer.textContent.trim().length > 10) {
             headerText = qContainer.textContent.trim();
-            logDebug(`Found question text in container: ${headerText.substring(0, 50)}...`);
+            // --- REMOVE LOGGING ---
+            // logDebug(`[DIAGNOSTIC] Text found via Container Strategy: ${headerText.substring(0, 150)}...`);
             break;
           }
         }
       }
-      
-      // 3. If still no question text, look for paragraphs or divs at the beginning
+
+      // Priority 4: Paragraph strategy (if others failed)
       if (!headerText) {
         const paragraphs = container.querySelectorAll('p, div:not(:has(*))');
-        
-        // Get only the first visible paragraph/div with substantial text
         for (const p of paragraphs) {
-          // Skip if contains a radio button (likely an answer)
           if (p.querySelector('input[type="radio"], input[type="checkbox"]')) continue;
-          
-          // Skip if very short
           if (p.textContent.trim().length < 10) continue;
-          
-          // Skip if hidden or empty
           if (p.offsetParent === null || getComputedStyle(p).display === 'none') continue;
-          
           headerText = p.textContent.trim();
-          logDebug(`Using first paragraph as question text: ${headerText.substring(0, 50)}...`);
+          // --- REMOVE LOGGING ---
+          // logDebug(`[DIAGNOSTIC] Text found via Paragraph Strategy: ${headerText.substring(0, 150)}...`);
           break;
         }
       }
-      
-      // 4. Final fallback - get the first 200 characters of the container if it has text
+
+      // Priority 5: Final fallback (if nothing else worked)
       if (!headerText && container.textContent.trim().length > 0) {
-        headerText = container.textContent.trim().split(/\n/)[0]; // First line only
+        // Try to be smarter: Exclude known header patterns from the start of the text
+        let fullContainerText = container.textContent.trim();
+        fullContainerText = fullContainerText.replace(/^\s*Unanswered\s*Question\s*\d+\s*/i, '').trim(); // Remove header pattern
+        headerText = fullContainerText.split(/\n/)[0]; // First line of remaining text
         if (headerText.length > 200) headerText = headerText.substring(0, 200) + '...';
-        logDebug(`Using container first line as question text: ${headerText}`);
+        // --- REMOVE LOGGING ---
+        // logDebug(`[DIAGNOSTIC] Text found via Fallback Strategy (First line of container minus header): ${headerText}`);
       }
-      
-      // Set the question to the header text we found
-      result.question = headerText;
-      
+      // --- END OF MODIFIED EXTRACTION LOGIC ---
+
+      // Assign the found text (if any) to result.question
+      result.question = headerText; // Assign whatever was found (could still be empty)
+
       // Restore CREAM buttons visibility
       creamButtons.forEach(btn => {
         btn.style.display = btn.dataset.originalDisplay || '';
         delete btn.dataset.originalDisplay;
       });
-      
-      // Clean up the question text
+
+      // Clean up the question text (even if it's empty)
+      const originalQuestionText = result.question; // Store before cleaning
       result.question = cleanQuestionText(result.question);
-      
-      // Now focus on finding all answer options - this is the key improvement
+      // --- REMOVE LOGGING ---
+      // logDebug(`[DIAGNOSTIC] Question text BEFORE cleaning: ${originalQuestionText.substring(0, 150)}...`);
+      // logDebug(`[DIAGNOSTIC] Question text AFTER cleaning: ${result.question.substring(0, 150)}...`);
+
+      // Find answer options
       findAnswerOptionsImproved(container, result);
-      
-      // --- START IMAGE EXTRACTION ---
+
+      // Image extraction (remains the same)
       const imageElements = container.querySelectorAll('img');
       logDebug(`Found ${imageElements.length} image elements in the container.`);
 
@@ -207,39 +235,39 @@
               }
           }
       });
-      // --- END IMAGE EXTRACTION ---
-      
-      // Create formatted full text with question and options
+
+      // Create formatted full text
       result.fullText = result.question + "\n\n";
-      
-      // Add image references to fullText if any were found
       if (result.images.length > 0) {
           result.fullText += `\n[Image${result.images.length > 1 ? 's' : ''} present in question]\n`;
       }
-      
       if (result.options.length > 0) {
         result.fullText += "Options:\n";
         result.options.forEach((option, index) => {
           result.fullText += `${index + 1}. ${option}\n`;
         });
       }
-      
-      // If failed to extract question or it's too short after cleaning, log error
+
+      // Validation check (now uses the potentially cleaned, possibly empty, question text)
       if (!result.question || result.question.length < 10) {
-        console.error('[CreamHelper] Failed to extract valid question text from', container);
+        // Log error if still invalid after all attempts and cleaning
+        console.error('[CreamHelper] Failed to extract valid question text after cleaning from', container);
+        // Keep placeholder logic
         result.question = "Unable to extract question content. Please try selecting a more specific element.";
         result.source = "extraction_failed";
       } else {
-        // Log success
         logDebug(`Successfully extracted question with ${result.options.length} options`);
       }
+
     } catch (error) {
       console.error('[CreamHelper] Error extracting question content:', error);
       result.fullText = container.textContent.trim();
       result.question = "Error extracting question. Please try again or select a more specific element.";
       result.source = "error";
     }
-    
+
+    // --- REMOVE LOGGING ---
+    logDebug('[CreamHelper DIAGNOSTIC] Final extracted data before return:', JSON.stringify(result, null, 2));
     return result;
   }
   
@@ -317,6 +345,8 @@
   function findAnswerOptionsImproved(container, result) {
     const uniqueOptions = new Set();
     result.options = [];
+    // --- ADDED LOGGING ---
+    logDebug('[CreamHelper DIAGNOSTIC] Starting findAnswerOptionsImproved within:', container);
     
     try {
       // First look for radio buttons - most reliable for multiple choice
@@ -400,9 +430,11 @@
             // Clean up the option text and add it if found
         if (optionText) {
           optionText = optionText.replace(/\s+/g, ' ').trim();
-              if (optionText && !uniqueOptions.has(optionText)) {
-                uniqueOptions.add(optionText);
+          if (optionText && !uniqueOptions.has(optionText)) {
+            uniqueOptions.add(optionText);
             result.options.push(optionText);
+            // --- ADDED LOGGING ---
+            logDebug(`[DIAGNOSTIC] Found option via Radio Strategy: ${optionText}`);
           }
         }
       });
@@ -424,6 +456,8 @@
           if (text && !uniqueOptions.has(text)) {
             uniqueOptions.add(text);
             result.options.push(text);
+            // --- ADDED LOGGING ---
+            logDebug(`[DIAGNOSTIC] Found option via List/Div Strategy: ${text}`);
           }
         });
       }
@@ -476,7 +510,9 @@
           if (text && !uniqueOptions.has(text)) {
             uniqueOptions.add(text);
             result.options.push(text);
-            }
+            // --- ADDED LOGGING ---
+            logDebug(`[DIAGNOSTIC] Found option via Sibling Div Strategy: ${text}`);
+          }
           });
         }
         
@@ -518,6 +554,8 @@
             if (combined && !uniqueOptions.has(combined)) {
               uniqueOptions.add(combined);
               result.options.push(combined);
+              // --- ADDED LOGGING ---
+              logDebug(`[DIAGNOSTIC] Found option via Parent Scan Strategy: ${combined}`);
               break; // Found good content, stop scanning up
             }
             
@@ -537,15 +575,21 @@
       if (isTrueFalseQuestion && result.options.length === 0) {
         result.options.push('True');
         result.options.push('False');
+        // --- ADDED LOGGING ---
+        logDebug('[DIAGNOSTIC] Added True/False options');
       }
       
       // For fill-in-the-blank questions
       if (result.question.includes('_____') && result.options.length === 0) {
         result.options.push("[Fill in the blank]");
+        // --- ADDED LOGGING ---
+        logDebug('[DIAGNOSTIC] Added Fill-in-the-blank option marker');
       }
       
       // Log what we found
-      logDebug(`Found ${result.options.length} options with improved method`);
+      // --- ADDED LOGGING ---
+      logDebug(`[CreamHelper DIAGNOSTIC] Finished findAnswerOptionsImproved. Found ${result.options.length} options total.`);
+      logDebug(`Found ${result.options.length} options with improved method`); // Keep original
       result.options.forEach((opt, i) => {
         logDebug(`Option ${i+1}: ${opt.substring(0, 50)}...`);
       });
@@ -1390,8 +1434,20 @@
     // Initial loading state
     updateAnalysis('Analyzing your question...', null, true);
     
-    // Process with AI
-    analyzeQuestionWithAI(questionData, updateAnalysis);
+    // Process with AI - MODIFIED to handle the Promise correctly
+    analyzeQuestionWithAI(questionData)
+      .then(analysisResult => {
+        // On success, call updateAnalysis with the result
+        updateAnalysis(analysisResult.answer, analysisResult.suggestedOption, false);
+      })
+      .catch(errorInfo => {
+        // On error, call updateAnalysis with the error message and fallback
+        updateAnalysis(
+          errorInfo.error + (errorInfo.fallbackText ? "\n\n" + errorInfo.fallbackText : ""), 
+          null, 
+          false
+        );
+      });
   }
 
   // New function to auto-select the answer in the original question

@@ -501,10 +501,6 @@ Please try selecting a region without people or try a different image.`,
     return true; // Keep the message channel open for asynchronous response
   }
 
-  
-  
-
-
   // Add a handler for getSolution action
   if (message.action === 'getSolution') {
     console.log('[Creamy Debug] [get-solution]: Processing solution request for text input');
@@ -574,44 +570,44 @@ Please try selecting a region without people or try a different image.`,
   // Handler for processQuestionWithOpenAI (CREAM button functionality)
   if (message.action === 'processQuestionWithOpenAI') {
     console.log('[Creamy Debug] [cream-analysis]: Processing question with OpenAI');
-    
+
     chrome.storage.local.get('openaiApiKey', async (data) => {
       const apiKey = data.openaiApiKey;
-      
+
       if (!apiKey) {
         console.error('[Creamy Error] [cream-analysis]: No OpenAI API key set');
         sendResponse({ error: 'Please set your OpenAI API key in the extension settings.' });
         return;
       }
-      
+
       try {
-        // Extract the question data
+        // --- Corrected Data Extraction ---
+        // Extract the question data, ensuring 'images' is included
         const { question, options, fullText, contextText, images } = message.questionData;
-        
+
         if (!question || (!fullText && !contextText)) {
           console.error('[Creamy Error] [cream-analysis]: Insufficient question data provided');
           sendResponse({ error: 'Insufficient question data provided' });
           return;
         }
-        
-        // Format the prompt for OpenAI - use contextText if available for better context
+
+        // --- Prepare Prompt Text --- 
+        // Use contextText if available, otherwise fullText or just question
         let promptText = contextText || fullText || question;
-        
-        // If we have options but not in the prompt already, format them nicely
+        // Append options if they exist and aren't already in the text
         if (options && options.length > 0 && !promptText.includes("Options:")) {
-          promptText += "\n\nOptions:\n" + options.map((opt, i) => `${i+1}) ${opt}`).join("\n");
+          promptText += "\n\nOptions:\n" + options.map((opt, i) => `${i + 1}) ${opt}`).join("\n");
         }
-        
-        // Log the prompt length and if images are included
+
         const imageCount = images ? images.length : 0;
         console.log(`[Creamy Debug] [cream-analysis]: Sending to OpenAI (${promptText.length} chars text, ${imageCount} images): ${promptText.substring(0, 200)}...`);
-        
-        // Check if this question requires external knowledge
+
+        // Check if the question requires external knowledge
         const forceAnswer = message.questionData.forceAnswer || false;
-        
-        // Improved system prompt (kept the same as before)
-        const systemPrompt = forceAnswer ? 
-        `You are a brilliant undergraduate student with exceptional knowledge across many fields including history, science, geography, literature, mathematics, and other academic subjects. You have a talent for answering questions clearly and accurately.
+
+        // --- System Prompt Definition (Unchanged) ---
+        const systemPrompt = forceAnswer ?
+          `You are a brilliant undergraduate student with exceptional knowledge across many fields including history, science, geography, literature, mathematics, and other academic subjects. You have a talent for answering questions clearly and accurately.
 
 Your approach:
 1. Draw from your broad knowledge base to provide well-reasoned, accurate answers
@@ -625,8 +621,8 @@ Format your response as follows:
 - Consider each option carefully using your knowledge of the subject matter
 - Conclude with "Suggested Answer: Option X" (where X is the number)
 
-Remember: The user needs your best assessment based on your knowledge as a top student. You're known for your ability to excel on exams and assignments.` 
-        : 
+Remember: The user needs your best assessment based on your knowledge as a top student. You're known for your ability to excel on exams and assignments.`
+        :
         `You are a brilliant undergraduate student with exceptional knowledge across many fields including history, science, geography, literature, mathematics, and other academic subjects. You have a talent for answering questions clearly and accurately.
 
 Your approach:
@@ -643,37 +639,36 @@ Format your response as follows:
 
 If the information in the question is genuinely insufficient to determine an answer, briefly explain why, but still provide your best educated guess as a top student would on an exam.`;
 
-        // Always use GPT-4o regardless of context length
+        // Always use GPT-4o
         const model = 'gpt-4o';
 
-        // --- START OpenAI MESSAGE CONSTRUCTION ---
+        // --- Construct OpenAI Messages Array ---
         const messages = [
-          { 
-            role: 'system', 
+          {
+            role: 'system',
             content: systemPrompt
           },
           {
             role: 'user',
-            // Content will be populated below
-            content: [] // Initialize as an array for multi-modal input
+            content: [] // Initialize content as an array for multi-modal
           }
         ];
 
-        // Add the main text prompt first
-        messages[1].content.push({ 
-          type: 'text', 
-          text: `What is the correct answer to this question? Analyze it carefully and completely. If there isn't enough information to determine the answer with certainty, explain what's missing.\n\n${promptText}` 
+        // Add the main text part to the user message content
+        messages[1].content.push({
+          type: 'text',
+          text: `What is the correct answer to this question? Analyze it carefully and completely. If there isn't enough information to determine the answer with certainty, explain what's missing.\n\n${promptText}`
         });
 
-        // --- START IMAGE FETCHING AND PROCESSING ---
-        let imageFetchPromises = [];
+        // --- Image Fetching and Processing --- 
+        let imageDataUrls = []; // Initialize array for valid data URLs
         if (images && images.length > 0) {
           console.log(`[Creamy Debug] [cream-analysis]: Fetching ${images.length} images...`);
-          imageFetchPromises = images.map(async (imageUrl) => {
+          
+          const imageFetchPromises = images.map(async (imageUrl) => {
             if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
               try {
-                // Fetch the image using the background script's context
-                const response = await fetch(imageUrl);
+                const response = await fetch(imageUrl); // Fetch image
                 if (!response.ok) {
                   throw new Error(`Failed to fetch image ${imageUrl}: ${response.status} ${response.statusText}`);
                 }
@@ -683,15 +678,13 @@ If the information in the question is genuinely insufficient to determine an ans
                 return new Promise((resolve, reject) => {
                   const reader = new FileReader();
                   reader.onloadend = () => {
-                    // Ensure the result is a valid data URL string
                     if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
-                      // Basic size check (OpenAI limit is 20MB)
                       const imageSizeInMB = (reader.result.length * 3 / 4) / (1024 * 1024);
-                      if (imageSizeInMB > 19.5) { // Leave a small margin
+                      if (imageSizeInMB > 19.5) { // Check size limit
                         console.warn(`[Creamy Warning] [cream-analysis]: Image ${imageUrl} (${imageSizeInMB.toFixed(2)}MB) exceeds size limit, skipping.`);
-                        resolve(null); // Resolve with null to indicate skip
+                        resolve(null); // Skip large images
                       } else {
-                        resolve(reader.result); // Resolve with the data URL
+                        resolve(reader.result); // Valid data URL
                       }
                     } else {
                       reject(new Error(`Failed to read image ${imageUrl} as data URL.`));
@@ -702,41 +695,42 @@ If the information in the question is genuinely insufficient to determine an ans
                 });
               } catch (error) {
                 console.error(`[Creamy Error] [cream-analysis]: Error fetching image ${imageUrl}:`, error);
-                return null; // Return null on fetch error
+                return null; // Null on fetch error
               }
             } else {
               console.warn(`[Creamy Warning] [cream-analysis]: Skipping invalid or non-http image URL: ${imageUrl}`);
-              return null; // Return null for invalid URLs
+              return null; // Null for invalid URLs
             }
           });
+          
+          // Wait for all fetches and filter out nulls
+          imageDataUrls = (await Promise.all(imageFetchPromises)).filter(url => url !== null);
+          console.log(`[Creamy Debug] [cream-analysis]: Successfully fetched and converted ${imageDataUrls.length} images to data URLs.`);
         }
-        
-        // Wait for all image fetches to complete
-        const imageDataUrls = (await Promise.all(imageFetchPromises)).filter(url => url !== null);
-        console.log(`[Creamy Debug] [cream-analysis]: Successfully fetched and converted ${imageDataUrls.length} images to data URLs.`);
-        // --- END IMAGE FETCHING AND PROCESSING ---
 
-        // Add the fetched image data URLs to the messages
+        // --- Add Images to OpenAI Messages (if any) ---
         if (imageDataUrls.length > 0) {
           imageDataUrls.forEach(dataUrl => {
             messages[1].content.push({
               type: 'image_url',
-              image_url: { 
-                url: dataUrl,
-                // Optional: Set detail level if needed (e.g., 'low' for large images)
-                // detail: "auto"
-              } 
+              image_url: {
+                url: dataUrl
+                // detail: "auto" // Optional detail setting
+              }
             });
           });
           console.log(`[Creamy Debug] [cream-analysis]: Added ${imageDataUrls.length} data URLs to the OpenAI request.`);
         } else if (images && images.length > 0) {
           console.warn(`[Creamy Warning] [cream-analysis]: Failed to fetch any valid images from the provided URLs.`);
-          // If images were expected but none fetched, send only text
-          messages[1].content = messages[1].content[0].text;
+          // If images were expected but none fetched, ensure content is just text
+          messages[1].content = messages[1].content[0].text; 
         } else {
-          // If no images were ever present, send only text
+          // If no images were ever present, ensure content is just text
           messages[1].content = messages[1].content[0].text;
         }
+
+        // --- Prepare API Call --- 
+        // Adjust max_tokens based on whether images are present
         // --- END OpenAI MESSAGE CONSTRUCTION ---
         
         // Increase max_tokens if images are present
@@ -765,7 +759,7 @@ If the information in the question is genuinely insufficient to determine an ans
         
         const data = await response.json();
         
-                if (data.choices && data.choices.length > 0) {
+        if (data.choices && data.choices.length > 0) {
           const analysis = data.choices[0].message.content;
           
           console.log(`[Creamy Debug] [cream-analysis]: Successfully received analysis (${analysis.length} chars)`);
@@ -878,7 +872,7 @@ try {
       logError('context-menu-create', error);
     }
   });
-      } catch (error) {
+} catch (error) {
   logError('context-menu-removeAll', error);
 }
 
@@ -889,66 +883,66 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       // This avoids the message port issue by keeping communication within the background script
       console.log('[Creamy Debug] [context-menu]: Processing selected text:', info.selectionText);
       
-    chrome.storage.local.get('openaiApiKey', async (data) => {
+      chrome.storage.local.get('openaiApiKey', async (data) => {
         try {
-      const apiKey = data.openaiApiKey;
+          const apiKey = data.openaiApiKey;
           
-      if (!apiKey) {
+          if (!apiKey) {
             console.error('[Creamy Error] [context-menu]: No OpenAI API key set');
             chrome.runtime.sendMessage({ 
               action: 'showScanResult', 
               error: 'Please set your OpenAI API key in the extension settings.' 
             });
-        return;
-      }
-      
+            return;
+          }
+          
           // Process the text with OpenAI
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
               model: 'gpt-4o',
-            messages: [
-              { 
-                role: 'system', 
+              messages: [
+                { 
+                  role: 'system', 
                   content: 'You are a brilliant undergraduate student with exceptionally high IQ and deep knowledge across multiple disciplines. You excel at solving problems, answering questions accurately, and explaining complex topics clearly. When presented with questions or problems, you provide direct, accurate answers rather than just analyzing what you see. You have a knack for quickly understanding the context and requirements of any academic question.'
-              },
-              {
-                role: 'user',
+                },
+                {
+                  role: 'user',
                   content: info.selectionText
                 }
               ],
               max_tokens: 1500
-          })
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
+            })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
             chrome.runtime.sendMessage({ 
               action: 'showScanResult', 
               error: `OpenAI API Error: ${errorText}` 
             });
-          return;
-        }
-        
-        const data = await response.json();
+            return;
+          }
           
-        if (data.choices && data.choices.length > 0) {
+          const data = await response.json();
+          
+          if (data.choices && data.choices.length > 0) {
             const solution = data.choices[0].message.content;
             chrome.runtime.sendMessage({ 
               action: 'showScanResult', 
               solution: solution
             });
-        } else {
+          } else {
             chrome.runtime.sendMessage({ 
               action: 'showScanResult', 
               error: 'Failed to get content from OpenAI API' 
             });
-        }
-      } catch (error) {
+          }
+        } catch (error) {
           console.error('[Creamy Error] [context-menu]:', error);
           chrome.runtime.sendMessage({ 
             action: 'showScanResult', 
@@ -982,19 +976,19 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                     action: 'showScanResult', 
                     error: 'Please set your OpenAI API key in the extension settings.' 
                   });
-        return;
-      }
-      
-      try {
+                  return;
+                }
+                
+                try {
                   console.log('[Creamy Debug] [openai-vision]: Starting analysis with OpenAI');
-        
-        // Ensure the imageData is in correct data URL format
+                  
+                  // Ensure the imageData is in correct data URL format
                   let imageUrl = imageData;
-        if (!imageUrl.startsWith('data:')) {
-          // If it's raw base64, convert it to a data URL
-          imageUrl = `data:image/jpeg;base64,${imageUrl}`;
-        }
-        
+                  if (!imageUrl.startsWith('data:')) {
+                    // If it's raw base64, convert it to a data URL
+                    imageUrl = `data:image/jpeg;base64,${imageUrl}`;
+                  }
+                  
                   // Calculate image size from base64 data to check if it's within limits
                   const imageSizeInBytes = Math.ceil((imageUrl.length * 3) / 4);
                   const imageSizeInMB = imageSizeInBytes / (1024 * 1024);
@@ -1005,45 +999,45 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                     chrome.runtime.sendMessage({ 
                       action: 'showScanResult', 
                       error: `Image too large (${imageSizeInMB.toFixed(2)} MB). OpenAI has a 20MB limit.` 
-              });
-              return;
+                    });
+                    return;
                   }
                   
                   // Send to OpenAI Vision API
                   console.log('[Creamy Debug] [openai-vision]: Sending request to OpenAI API');
                   const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
                       'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o',
-              messages: [
-                {
-                  role: 'system',
-                          content: 'You are a brilliant undergraduate student with exceptionally high IQ and deep knowledge across multiple disciplines. You excel at solving problems, answering questions accurately, and explaining complex topics clearly. When presented with questions or problems, you provide direct, accurate answers rather than just analyzing what you see. You have a knack for quickly understanding the context and requirements of any academic question.'
-                },
-                {
-                  role: 'user',
-                  content: [
-                    {
-                      type: 'text',
-                              text: 'Look at this image and answer any question or solve any problem it contains. Don\'t just describe what you see or analyze the content - focus on providing the correct answer or solution directly. If there\'s a question or problem, I need your best answer as a brilliant student.'
                     },
-                    {
-                      type: 'image_url',
-                      image_url: {
-                        url: imageUrl
-                      }
-                    }
-                  ]
-                }
-              ],
+                    body: JSON.stringify({
+                      model: 'gpt-4o',
+                      messages: [
+                        {
+                          role: 'system',
+                          content: 'You are a brilliant undergraduate student with exceptionally high IQ and deep knowledge across multiple disciplines. You excel at solving problems, answering questions accurately, and explaining complex topics clearly. When presented with questions or problems, you provide direct, accurate answers rather than just analyzing what you see. You have a knack for quickly understanding the context and requirements of any academic question.'
+                        },
+                        {
+                          role: 'user',
+                          content: [
+                            {
+                              type: 'text',
+                              text: 'Look at this image and answer any question or solve any problem it contains. Don\'t just describe what you see or analyze the content - focus on providing the correct answer or solution directly. If there\'s a question or problem, I need your best answer as a brilliant student.'
+                            },
+                            {
+                              type: 'image_url',
+                              image_url: {
+                                url: imageUrl
+                              }
+                            }
+                          ]
+                        }
+                      ],
                       max_tokens: 4000
-            })
-          });
-          
+                    })
+                  });
+                  
                   console.log('[Creamy Debug] [openai-vision]: API response status:', response.status);
                   
                   if (!response.ok) {
@@ -1064,9 +1058,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 Please try selecting a region without people or try a different image.`,
                         isPolicyError: true
                       });
-            return;
-          }
-          
+                      return;
+                    }
+                    
                     chrome.runtime.sendMessage({ 
                       action: 'showScanResult', 
                       error: `OpenAI API Error (${response.status}): ${errorText}` 
@@ -1104,14 +1098,14 @@ Please try selecting a region without people or try a different image.`,
                       solution: result,
                       success: true 
                     });
-        } else {
+                  } else {
                     console.error('[Creamy Error] [openai-vision]: No content in API response', data);
                     chrome.runtime.sendMessage({ 
                       action: 'showScanResult', 
                       error: 'Failed to get content from OpenAI API' 
                     });
-        }
-      } catch (error) {
+                  }
+                } catch (error) {
                   console.error('[Creamy Error] [openai-vision]:', error);
                   chrome.runtime.sendMessage({ 
                     action: 'showScanResult', 
