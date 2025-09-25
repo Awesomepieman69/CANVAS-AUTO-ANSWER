@@ -7,6 +7,7 @@
   let questionButtons = new Map();
   let isProcessing = false;
   let isCanvasPage = false;
+  let isMHEPage = false; // track McGraw Hill page
   // Make sure all variables are scoped inside the IIFE
   let creamPort = null; // Renamed from 'port' to avoid collisions with content.js
 
@@ -33,6 +34,17 @@
     }
     
     return isCanvasPage;
+  }
+  
+  // Check if this is a McGraw-Hill Education page
+  function checkIfMHE() {
+    const isMHEURL = window.location.hostname.includes('mheducation.com');
+    const hasMHEElements = document.querySelector('.multiple-choice-component, .multiple-select-component, .assessment-part') !== null;
+    isMHEPage = isMHEURL || hasMHEElements;
+    if (isMHEPage) {
+      logDebug('Detected McGraw-Hill Learning page - using specialized handling');
+    }
+    return isMHEPage;
   }
   
   // Get full question content including answer options
@@ -720,6 +732,19 @@
       });
     }
     
+    // --- Priority MHE: Multiple Choice Component ---
+    if (isMHEPage || checkIfMHE()) {
+      const mheContainers = document.querySelectorAll('div.multiple-choice-component, div.multiple-select-component');
+      logDebug(`MHE: Found ${mheContainers.length} .multiple-choice-component and .multiple-select-component elements`);
+      mheContainers.forEach(container => {
+        if (processedElements.has(container)) return;
+        const headerDiv = container.closest('div').querySelector('.prompt');
+        const headerText = headerDiv ? headerDiv.textContent.trim() : container.textContent.trim().substring(0,100);
+        processedElements.add(container);
+        questionElements.push({ element: container, text: headerText, strategy: 'mhe_multiple_choice' });
+      });
+    }
+    
     logDebug(`Finished finding questions. Total unique containers found: ${questionElements.length}`);
     
     // Return the array (already ensures unique containers because we check processedElements)
@@ -940,7 +965,8 @@
         console.log('[CreamHelper Debug] Formatting successful response:', response);
           let analysisResult = { 
             answer: "", 
-            suggestedOption: null 
+            suggestedOption: null,
+            suggestedOptions: []
           };
         
         if (response.answer) {
@@ -958,6 +984,18 @@
               } else {
                   analysisResult.suggestedOption = parseInt(extractedOption);
               }
+            }
+            
+            // Extract multiple option numbers/letters
+            const multiMatch = response.answer.match(/(?:option|choice|answer)?\s*([A-D]|\d)+(?:\s*,\s*|\s+and\s+|\s+&\s+|\s+)([A-D]|\d)+/ig);
+            if (multiMatch) {
+              const nums = [];
+              multiMatch.forEach(seg => {
+                seg.split(/[^A-D0-9]+/i).forEach(tok=>{
+                  if(tok){nums.push(tok);}
+                });
+              });
+              analysisResult.suggestedOptions = nums.map(t=>/^[A-D]$/i.test(t)? t.toUpperCase().charCodeAt(0)-64 : parseInt(t));
             }
             
             // Check for true/false recommendations
@@ -1437,8 +1475,8 @@
     // Process with AI - MODIFIED to handle the Promise correctly
     analyzeQuestionWithAI(questionData)
       .then(analysisResult => {
-        // On success, call updateAnalysis with the result
-        updateAnalysis(analysisResult.answer, analysisResult.suggestedOption, false);
+        const optionsArr = analysisResult.suggestedOptions && analysisResult.suggestedOptions.length ? analysisResult.suggestedOptions : analysisResult.suggestedOption;
+        updateAnalysis(analysisResult.answer, optionsArr, false);
       })
       .catch(errorInfo => {
         // On error, call updateAnalysis with the error message and fallback
@@ -1453,6 +1491,11 @@
   // New function to auto-select the answer in the original question
   function autoSelectAnswer(questionElement, optionNumber) {
     try {
+      // Handle array of options for multiple selection
+      if (Array.isArray(optionNumber)) {
+        return autoSelectMultipleOptions(questionElement, optionNumber);
+      }
+      
       if (!optionNumber || optionNumber <= 0) {
         console.warn('[CreamHelper] No valid option number provided for auto-selection');
         return { success: false, message: "No valid option number available" };
@@ -1523,6 +1566,36 @@
           optionGroups.set(index + 1, [input]);
         });
       }
+      
+      // >>> NEW SIMPLE INDEX FALLBACK <<<
+      const selectByIndexFallback = () => {
+        if (optionNumber > inputElements.length) return false;
+        const targetInput = inputElements[optionNumber - 1];
+        if (!targetInput) return false;
+        let clickTarget = targetInput;
+        const mheWrapper = targetInput.closest('mhe-checkbox');
+        const spanContainer = targetInput.closest('label')?.querySelector('span.choice-container');
+        if (spanContainer) {
+          clickTarget = spanContainer;
+        } else if (mheWrapper) {
+          clickTarget = mheWrapper;
+        }
+        const clickSequence = (el) => {
+          const rect = el.getBoundingClientRect();
+          const cx = Math.floor(rect.left + rect.width/2);
+          const cy = Math.floor(rect.top + rect.height/2);
+          ['mousedown','mouseup','click'].forEach(ev=>{
+            el.dispatchEvent(new MouseEvent(ev,{view:window,bubbles:true,cancelable:true,clientX:cx,clientY:cy,button:0}));
+          });
+        };
+        clickSequence(clickTarget);
+        targetInput.checked = true;
+        const changeEv = new Event('change',{bubbles:true});
+        targetInput.dispatchEvent(changeEv);
+        const inputEv = new Event('input',{bubbles:true});
+        targetInput.dispatchEvent(inputEv);
+        return true;
+      };
       
       // Find the option group matching the recommended number
       if (optionGroups.has(optionNumber)) {
@@ -1724,26 +1797,35 @@
         // Create button
         const button = createCreamButton();
         
-        // Click handler
-        button.addEventListener('click', (e) => {
-          // Prevent default action and stop propagation to prevent form submission
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-          
-          // Calculate position for popup
-          const buttonRect = button.getBoundingClientRect();
-          const position = {
-            x: buttonRect.left + buttonRect.width / 2,
-            y: buttonRect.top + buttonRect.height + 10
-          };
-          
-          // Show the transcript popup with the element (not just text)
-          showTranscriptPopup(header, position);
-          
-          // Return false to prevent default action
-          return false;
-        });
+                 // Click handler
+         button.addEventListener('click', (e) => {
+           // Prevent default action and stop propagation to prevent form submission
+           e.preventDefault();
+           e.stopPropagation();
+           e.stopImmediatePropagation();
+           
+           // Calculate position for popup
+           const buttonRect = button.getBoundingClientRect();
+           const position = {
+             x: buttonRect.left + buttonRect.width / 2,
+             y: buttonRect.top + buttonRect.height + 10
+           };
+           
+           // Show the transcript popup with the element (not just text)
+           showTranscriptPopup(header, position);
+           
+           // Select random confidence and click next button
+           selectRandomConfidence();
+           setTimeout(() => {
+             const nextButton = document.querySelector('button.btn.btn-primary.next-button, .btn.btn-primary.next-button, button[class*="next-button"]');
+             if (nextButton && !nextButton.disabled) {
+               nextButton.click();
+             }
+           }, 500);
+           
+           // Return false to prevent default action
+           return false;
+         });
         
         // Add the button to the header
         header.appendChild(button);
@@ -1806,32 +1888,41 @@
         // Create the button
         const button = createCreamButton();
         
-        // Click handler
-        button.addEventListener('click', (e) => {
-          // Prevent default action and stop propagation to prevent form submission
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-          
-          // Calculate position for popup
-          const buttonRect = button.getBoundingClientRect();
-          const position = {
-            x: buttonRect.left + buttonRect.width / 2,
-            y: buttonRect.top + buttonRect.height + 10
-          };
-          
-          // Show the transcript popup with the element (not just text)
-          const popup = showTranscriptPopup(element, position);
-          
-          // Store reference to the button and popup
-          questionButtons.set(questionId, {
-            button,
-            popup
-          });
-          
-          // Return false to prevent default action
-          return false;
-        });
+                 // Click handler
+         button.addEventListener('click', (e) => {
+           // Prevent default action and stop propagation to prevent form submission
+           e.preventDefault();
+           e.stopPropagation();
+           e.stopImmediatePropagation();
+           
+           // Calculate position for popup
+           const buttonRect = button.getBoundingClientRect();
+           const position = {
+             x: buttonRect.left + buttonRect.width / 2,
+             y: buttonRect.top + buttonRect.height + 10
+           };
+           
+           // Show the transcript popup with the element (not just text)
+           const popup = showTranscriptPopup(element, position);
+           
+           // Store reference to the button and popup
+           questionButtons.set(questionId, {
+             button,
+             popup
+           });
+           
+           // Select random confidence and click next button
+           selectRandomConfidence();
+           setTimeout(() => {
+             const nextButton = document.querySelector('button.btn.btn-primary.next-button, .btn.btn-primary.next-button, button[class*="next-button"]');
+             if (nextButton && !nextButton.disabled) {
+               nextButton.click();
+             }
+           }, 500);
+           
+           // Return false to prevent default action
+           return false;
+         });
         
         // Add the button to the element
         if (element.querySelector('h1, h2, h3, h4, h5, h6') && !element.closest('h1, h2, h3, h4, h5, h6')) {
@@ -2060,13 +2151,28 @@
               logDebug(`Analysis complete. Suggested option: ${analysisResult.suggestedOption}`);
 
               // 3. Auto-select answer if suggested (using the container)
-              if (analysisResult.suggestedOption) {
-                const selectResult = autoSelectAnswer(questionContainer, analysisResult.suggestedOption);
+              const optionsToSelect = analysisResult.suggestedOptions && analysisResult.suggestedOptions.length > 0 
+                ? analysisResult.suggestedOptions 
+                : analysisResult.suggestedOption;
+              
+              if (optionsToSelect) {
+                const selectResult = autoSelectAnswer(questionContainer, optionsToSelect);
                 if (selectResult.success) {
-                  logDebug(`Successfully auto-selected option ${analysisResult.suggestedOption}`);
+                  const optionText = Array.isArray(optionsToSelect) 
+                    ? `options ${optionsToSelect.join(', ')}` 
+                    : `option ${optionsToSelect}`;
+                  logDebug(`Successfully auto-selected ${optionText}`);
                   questionContainer.style.outline = '3px solid #1e3a00'; // Thicker Green on success
+                  selectRandomConfidence();
+                  setTimeout(()=>{
+                    const nextBtn=document.querySelector('button.btn.btn-primary.next-button, .btn.btn-primary.next-button, button[class*="next-button"], button.submit_button.next-question');
+                    if(nextBtn && !nextBtn.disabled) nextBtn.click();
+                  },600);
                 } else {
-                  logDebug(`Failed to auto-select option ${analysisResult.suggestedOption}: ${selectResult.message}`);
+                  const optionText = Array.isArray(optionsToSelect) 
+                    ? `options ${optionsToSelect.join(', ')}` 
+                    : `option ${optionsToSelect}`;
+                  logDebug(`Failed to auto-select ${optionText}: ${selectResult.message}`);
                   questionContainer.style.outline = '3px solid #3a0000'; // Thicker Red on selection failure
                   errorCount++;
                 }
@@ -2135,7 +2241,7 @@
 
       // Flag to determine if we should click 'Next' at the end
       let shouldClickNext = false;
-      const nextButtonSelector = 'button.submit_button.next-question';
+      const nextButtonSelector = 'button.submit_button.next-question, button.next-button, .next-button-container button';
 
       if (questionsToProcess.length === 0) {
         // Before sending error, check if maybe we just navigated and should stop
@@ -2181,13 +2287,28 @@
           const analysisResult = await analyzeQuestionWithAI(questionData);
           logDebug(`Analysis complete. Suggested option: ${analysisResult.suggestedOption}`);
 
-          if (analysisResult.suggestedOption) {
-            const selectResult = autoSelectAnswer(questionContainer, analysisResult.suggestedOption);
+          const optionsToSelect = analysisResult.suggestedOptions && analysisResult.suggestedOptions.length > 0 
+            ? analysisResult.suggestedOptions 
+            : analysisResult.suggestedOption;
+          
+          if (optionsToSelect) {
+            const selectResult = autoSelectAnswer(questionContainer, optionsToSelect);
             if (selectResult.success) {
-              logDebug(`Successfully auto-selected option ${analysisResult.suggestedOption}`);
+              const optionText = Array.isArray(optionsToSelect) 
+                ? `options ${optionsToSelect.join(', ')}` 
+                : `option ${optionsToSelect}`;
+              logDebug(`Successfully auto-selected ${optionText}`);
               questionContainer.style.outline = '3px solid #1e3a00'; // Thicker Green on success
+              selectRandomConfidence();
+              setTimeout(()=>{
+                const nextBtn=document.querySelector('button.btn.btn-primary.next-button, .btn.btn-primary.next-button, button[class*="next-button"], button.submit_button.next-question');
+                if(nextBtn && !nextBtn.disabled) nextBtn.click();
+              },600);
             } else {
-              logDebug(`Failed to auto-select option ${analysisResult.suggestedOption}: ${selectResult.message}`);
+              const optionText = Array.isArray(optionsToSelect) 
+                ? `options ${optionsToSelect.join(', ')}` 
+                : `option ${optionsToSelect}`;
+              logDebug(`Failed to auto-select ${optionText}: ${selectResult.message}`);
               questionContainer.style.outline = '3px solid #3a0000'; // Thicker Red on selection failure
               errorCount++;
             }
@@ -2225,18 +2346,18 @@
       logDebug(`Finished processing page questions. Processed: ${processedCount}, Errors: ${errorCount}`);
 
       // --- Check for Next Button Logic ---
-      if (questionsToProcess.length === 1 && processedCount === 1 && errorCount === 0) {
+      if (processedCount === questionsToProcess.length && errorCount === 0) {
         const nextButton = document.querySelector(nextButtonSelector);
         if (nextButton) {
-          logDebug('Found single question and a Next button. Proceeding to next page.');
+          logDebug('All questions processed successfully and Next button found. Proceeding to next page.');
           shouldClickNext = true;
         } else {
-          logDebug('Found single question, but no Next button found.');
+          logDebug('All questions processed, but no Next button found.');
           shouldClickNext = false;
         }
       } else {
-         shouldClickNext = false; // Don't click next if multiple questions or errors
-         if (questionsToProcess.length > 1) logDebug('Multiple questions found, not clicking Next.');
+         shouldClickNext = false;
+         if (processedCount !== questionsToProcess.length) logDebug('Not all questions processed, not clicking Next.');
          if (errorCount > 0) logDebug('Errors encountered, not clicking Next.');
       }
 
@@ -2266,9 +2387,44 @@
               logDebug('Clicking Next button...');
               await new Promise(resolve => setTimeout(resolve, 300)); // Short delay for visual feedback
               
-              nextButton.click();
-              // Stop further execution on this page after click initiated
-              return; 
+              // if disabled, trigger review concept flow with loop
+              if(nextButton.disabled || nextButton.hasAttribute('disabled')){
+                logDebug('Next button disabled – triggering Review Concept fallback loop');
+                let reviewAttempts = 0;
+                const maxAttempts = 10; // Prevent infinite loop
+                while ((nextButton.disabled || nextButton.hasAttribute('disabled')) && reviewAttempts < maxAttempts) {
+                  const reviewBtn = document.querySelector('.btn.btn-tertiary.lr-tray-button');
+                  if(!reviewBtn){
+                    logDebug('No more Review Concept button found. Aborting loop.');
+                    break;
+                  }
+                  logDebug(`Review attempt ${reviewAttempts + 1}: Clicking Review Concept button`);
+                  reviewBtn.click();
+                  await new Promise(r=>setTimeout(r,1000));
+                  const continueBtn = document.querySelector('.button-bar-wrapper button');
+                  if(continueBtn){
+                    logDebug('Clicking Continue button after review');
+                    continueBtn.click();
+                  }
+                  await new Promise(r=>setTimeout(r,800));
+                  // Re-query nextButton in case DOM changed
+                  nextButton = document.querySelector(nextButtonSelector);
+                  if (!nextButton) {
+                    logDebug('Next button disappeared during review loop.');
+                    break;
+                  }
+                  reviewAttempts++;
+                }
+              }
+              // re-check after potential loop
+              if(nextButton.disabled || nextButton.hasAttribute('disabled')){
+                logDebug('Next button still disabled after review attempts, aborting auto-next.');
+              } else {
+                nextButton.style.outline='3px solid #007bff';
+                await new Promise(res=>setTimeout(res,300));
+                nextButton.click();
+                return;
+              }
           } catch (e) {
               logError('next-button', e);
               sessionStorage.removeItem('creamAutoNextActive'); // Clear flag on error
@@ -2362,5 +2518,109 @@
       // Delay slightly more on window.load
       setTimeout(runAutoNextIfActive, 1000); 
   });
+
+  function selectRandomConfidence() {
+    try {
+      if (!isMHEPage && !checkIfMHE()) return;
+      const container = document.querySelector('.confidence-buttons-container');
+      if (!container) return;
+      const buttons = container.querySelectorAll('button, [role="button"]');
+      if (buttons.length === 0) return;
+      const randomBtn = buttons[Math.floor(Math.random() * buttons.length)];
+      randomBtn.click();
+      logDebug('Clicked random confidence button');
+    } catch (e) {
+      console.error('[CreamHelper] Error selecting confidence button:', e);
+    }
+  }
+
+  // Enhanced function to select multiple options for checkbox questions
+  function autoSelectMultipleOptions(questionElement, optionNumbers) {
+    try {
+      logDebug(`Attempting to select multiple options: ${optionNumbers.join(', ')}`);
+      
+      const container = questionElement.closest('.question_holder, .display_question, [id^="question_"]') || questionElement;
+      const inputElements = container.querySelectorAll('input[type="checkbox"]');
+      
+      if (inputElements.length === 0) {
+        logDebug('No checkbox elements found for multiple selection');
+        return { success: false, message: "No checkbox options found" };
+      }
+      
+      let successCount = 0;
+      let totalAttempts = optionNumbers.length;
+      
+      optionNumbers.forEach(optionNum => {
+        if (optionNum > 0 && optionNum <= inputElements.length) {
+          const targetInput = inputElements[optionNum - 1];
+          
+          if (targetInput) {
+            try {
+              // Find the best click target
+              let clickTarget = targetInput;
+              const mheWrapper = targetInput.closest('mhe-checkbox');
+              const labelWrapper = targetInput.closest('label');
+              const spanContainer = labelWrapper?.querySelector('span.choice-container, .choice-row, .printable-option');
+              
+              if (spanContainer) {
+                clickTarget = spanContainer;
+              } else if (mheWrapper) {
+                clickTarget = mheWrapper;
+              } else if (labelWrapper) {
+                clickTarget = labelWrapper;
+              }
+              
+              // Simulate mouse click sequence
+              const rect = clickTarget.getBoundingClientRect();
+              const centerX = Math.floor(rect.left + rect.width / 2);
+              const centerY = Math.floor(rect.top + rect.height / 2);
+              
+              const mouseEvents = ['mousedown', 'mouseup', 'click'];
+              mouseEvents.forEach(eventType => {
+                clickTarget.dispatchEvent(new MouseEvent(eventType, {
+                  view: window,
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: centerX,
+                  clientY: centerY,
+                  button: 0
+                }));
+              });
+              
+              // Ensure checkbox is checked
+              if (!targetInput.checked) {
+                targetInput.checked = true;
+                targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+              
+              logDebug(`Successfully selected option ${optionNum}`);
+              successCount++;
+              
+            } catch (error) {
+              logError(`Error selecting option ${optionNum}:`, error);
+            }
+          }
+        } else {
+          logDebug(`Invalid option number: ${optionNum} (valid range: 1-${inputElements.length})`);
+        }
+      });
+      
+      const success = successCount > 0;
+      const message = `Selected ${successCount} out of ${totalAttempts} options`;
+      
+      logDebug(message);
+      return { success, message };
+      
+    } catch (error) {
+      logError('Error in autoSelectMultipleOptions:', error);
+      return { success: false, message: `Error selecting multiple options: ${error.message}` };
+    }
+  }
+
+  // Legacy helper function (kept for compatibility)
+  function autoSelectMultiple(questionElement, optionNumbers) {
+    return autoSelectMultipleOptions(questionElement, optionNumbers);
+  }
 
 })(); // End of IIFE

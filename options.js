@@ -110,12 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'gpt-5',
+        reasoning_effort: 'minimal',
+        verbosity: 'low',
         messages: [
           { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: 'Say "Hello, Creamy!" to test the connection' }
         ],
-        max_tokens: 20
+        max_completion_tokens: 20
       })
     })
     .then(response => {

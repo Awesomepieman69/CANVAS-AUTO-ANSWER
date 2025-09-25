@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.scripting.executeScript(
         {
           target: { tabId: tabId },
-          files: ['content.js', 'question_transcript.js']
+          files: ['content.js']
         },
         () => {
           if (chrome.runtime.lastError) {
