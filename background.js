@@ -291,7 +291,9 @@ Please provide the answer in a clear, concise format. If this is a multiple choi
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o',
+            model: 'gpt-5',
+            reasoning_effort: 'minimal',
+            verbosity: 'low',
             messages: [
               { 
                 role: 'system', 
@@ -302,8 +304,7 @@ Please provide the answer in a clear, concise format. If this is a multiple choi
                 content: prompt
               }
             ],
-            max_tokens: 500,
-            temperature: 0.3
+            max_completion_tokens: 500
           })
         });
         
@@ -398,11 +399,13 @@ Please provide the answer in a clear, concise format. If this is a multiple choi
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o',
+            model: 'gpt-5',
+            reasoning_effort: 'minimal',
+            verbosity: 'low',
             messages: [
               { 
                 role: 'system', 
-                content: 'You are a brilliant undergraduate student with exceptionally high IQ and deep knowledge across multiple disciplines. You excel at solving problems, answering questions accurately, and explaining complex topics clearly. When presented with questions or problems, you provide direct, accurate answers rather than just analyzing what you see. You have a knack for quickly understanding the context and requirements of any academic question.'
+                content: 'You are a brilliant undergraduate student with exceptionally high IQ and deep knowledge across multiple disciplines. You excel at solving problems, answering questions accurately, and explaining complex topics clearly. When presented with questions or problems, you provide direct, accurate answers rather than just analyzing what you see. You have a knack for quickly understanding the context and requirements of any academic question. Critically, you are also an expert translator: any language encountered must be translated into English, and all your responses must be in English.'
               },
               {
                 role: 'user',
@@ -420,7 +423,7 @@ Please provide the answer in a clear, concise format. If this is a multiple choi
                 ]
               }
             ],
-            max_tokens: 4000
+            max_completion_tokens: 4000
           })
         });
 
@@ -530,7 +533,9 @@ Please try selecting a region without people or try a different image.`,
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o',
+            model: 'gpt-5',
+            reasoning_effort: 'minimal',
+            verbosity: 'low',
             messages: [
               { 
                 role: 'system', 
@@ -541,7 +546,7 @@ Please try selecting a region without people or try a different image.`,
                 content: question
               }
             ],
-            max_tokens: 1500
+            max_completion_tokens: 1500
           })
         });
         
@@ -639,8 +644,8 @@ Format your response as follows:
 
 If the information in the question is genuinely insufficient to determine an answer, briefly explain why, but still provide your best educated guess as a top student would on an exam.`;
 
-        // Always use GPT-4o
-        const model = 'gpt-4o';
+        // Always use GPT-4.1
+        const model = 'gpt-5';
 
         // --- Construct OpenAI Messages Array ---
         const messages = [
@@ -744,9 +749,10 @@ If the information in the question is genuinely insufficient to determine an ans
           },
           body: JSON.stringify({
             model: model,
+            reasoning_effort: 'minimal',
+            verbosity: 'low',
             messages: messages, // Use the constructed messages array
-            max_tokens: maxTokens, // Adjusted max_tokens
-            temperature: 0.1
+            max_completion_tokens: maxTokens // Adjusted max_tokens
           })
         });
         
@@ -904,7 +910,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
               'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-              model: 'gpt-4o',
+              model: 'gpt-5',
+              reasoning_effort: 'minimal',
+              verbosity: 'low',
               messages: [
                 { 
                   role: 'system', 
@@ -915,7 +923,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                   content: info.selectionText
                 }
               ],
-              max_tokens: 1500
+              max_completion_tokens: 1500
             })
           });
           
@@ -1012,7 +1020,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                       'Authorization': `Bearer ${apiKey}`
                     },
                     body: JSON.stringify({
-                      model: 'gpt-4o',
+                      model: 'gpt-5',
+                      reasoning_effort: 'minimal',
+                      verbosity: 'low',
                       messages: [
                         {
                           role: 'system',
@@ -1034,7 +1044,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                           ]
                         }
                       ],
-                      max_tokens: 4000
+                      max_completion_tokens: 4000
                     })
                   });
                   
