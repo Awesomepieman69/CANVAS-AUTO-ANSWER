@@ -1,0 +1,58 @@
+body {
+    width: 350px;
+    padding: 10px;
+    font-family: Arial, sans-serif;
+  }
+  h1 {
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+  .tabs {
+    display: flex;
+    margin-bottom: 10px;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 5px;
+    border: none;
+    background: #f0f0f0;
+    cursor: pointer;
+  }
+  .tab-btn.active {
+    background: #000000;
+    color: white;
+  }
+  .tab-content {
+    display: none;
+  }
+  .tab-content.active {
+    display: block;
+  }
+  .chat-messages {
+    height: 150px;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    padding: 5px;
+    margin-bottom: 10px;
+  }
+  #chatInput {
+    width: calc(100% - 70px);
+    padding: 5px;
+  }
+  #chatSendBtn, #scanBtn, #scanPageBtn {
+    padding: 5px 10px;
+    background: #000000;
+    color: white;
+    border: none;
+    cursor: pointer;
+  }
+  #imageInput {
+    margin: 10px 0;
+  }
+  #scanResult, #pageScanResult {
+    margin-top: 10px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    max-height: 150px;
+    overflow-y: auto;
+  }
